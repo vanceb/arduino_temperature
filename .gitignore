@@ -26,3 +26,7 @@
 *.exe
 *.out
 *.app
+
+# Platformio Build and status
+.pioenvs
+.sconsign.dblite
