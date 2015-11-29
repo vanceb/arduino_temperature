@@ -8,7 +8,7 @@
 #include <DallasTemperature.h>
 
 
-// Set up the pins to communicate with the display
+// Set up the pins to communicathttp://www.hobbytronics.co.uk/ds18b20-arduinoe with the display
 // Using software SPI
 #define OLED_MOSI  10
 #define OLED_CLK   11
@@ -33,22 +33,26 @@ Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 #define MODE_HIST_IN 3
 #define MODE_HIST_OUT 4
 // MAX_MODES used to roll aroind the modes using: mode++ % MAX_MODES
-#define MAX_MODES 5
+#define MAX_MODES 3
 
 // Button
 #define BUTTON_PIN 2
 #define DEBOUNCE 100
 #define LONG_PRESS 3000
 
+// Display constants
+#define START_GRAPH 32
+
 // Define variables used
+// The buffer bin containing the next temperature reading
+int nextBin;
+int timeBin;
 // These are used to record highs and lows since reset
 float inHigh, inLow;
 float outHigh, outLow;
 // These arrays store highs and lows at 15 minute intervals for 24 hours
-float inHigh24[HISTORY_SIZE];
-float inLow24[HISTORY_SIZE];
-float outHigh24[HISTORY_SIZE];
-float outLow24[HISTORY_SIZE];
+float inBuffer[HISTORY_SIZE];
+float outBuffer[HISTORY_SIZE];
 // Define variables to hold the current temperature values
 float in;
 float out;
@@ -66,8 +70,64 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
 
+// Helper Functions
+float highest(float* data){
+  float highest = -274.0;
+  for (int i=0; i<HISTORY_SIZE; i++){
+    if(data[i] > highest){
+      highest = data[i];
+    }
+  }
+  return highest;
+}
+float lowest(float* data){
+  float lowest = 1000;
+  for (int i=0; i<HISTORY_SIZE; i++){
+    if(data[i] < lowest){
+      lowest = data[i];
+    }
+  }
+  return lowest;
+}
 
+// Create the Graph axes
+void drawAxes(){
+  // Draw Tickmarks
+  for(int i=0; i<HISTORY_SIZE; i++){
+    if (i % (HISTORY_SIZE/4) == 0){
+      int xTick = START_GRAPH + i;
+      display.drawLine(xTick, display.height(),xTick, display.height()-4, WHITE);
+    } else if (i % (HISTORY_SIZE/24) == 0) {
+      int xTick = START_GRAPH + i;
+      display.drawLine(xTick, display.height(),xTick, display.height()-2, WHITE);
+    }
+  }
+}
 
+void label(char* text){
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,12);
+  display.print(text);
+}
+
+void plot(float* data){
+  float max = highest(data);
+  float min = lowest(data);
+  float scale = display.height()/(max-min);
+  int nowBin = (millis()/BIN_MILLIS) % HISTORY_SIZE;
+  int newY;
+  for (int i=1; i<HISTORY_SIZE; i++){
+    newY = display.height() - (int) floor(data[(i + nowBin + 1) % HISTORY_SIZE]*scale);
+    display.drawPixel(START_GRAPH + i, newY, WHITE);
+  }
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.print(max);
+  display.setCursor(0,display.height() - 7);
+  display.print(min);
+}
 
 // Functions
 // Display the live data
@@ -86,21 +146,19 @@ void displayLive(){
 
 // Display the High and Low inside temperatures
 void displayHLIn(){
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
   display.clearDisplay();
-  display.setCursor(0,0);
-  display.print("Mode HL In");
+  label("In");
+  drawAxes();
+  plot(inBuffer);
   display.display();
 }
 
 // Display the High and Low outside temperatures
 void displayHLOut(){
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
   display.clearDisplay();
-  display.setCursor(0,0);
-  display.print("Mode HL Out");
+  label("Out");
+  drawAxes();
+  plot(outBuffer);
   display.display();
 }
 
@@ -122,11 +180,6 @@ void displayHistOut(){
   display.setCursor(0,0);
   display.print("Mode Hist Out");
   display.display();
-}
-
-// Create the Graph axes
-void displayAxes(){
-
 }
 
 // Update the display
@@ -185,19 +238,34 @@ void setup(){
   display.begin(SSD1306_SWITCHCAPVCC);
   // Start up the DallasTemperature sensor
   sensors.begin();  // Start up the library
-  mode = MODE_HL_IN;
+  mode = MODE_LIVE;
   // Attach Button Interrupt
   pinMode(BUTTON_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonInterrupt, CHANGE);
+  // Set the last read time to 0
+  sensors.requestTemperatures(); // Send the command to get temperatures
+  in = sensors.getTempCByIndex(0);
+  out = sensors.getTempCByIndex(1);
+  nextBin = 0;
+  for (int i=0; i<HISTORY_SIZE; i++){
+    inBuffer[i] = in;
+    outBuffer[i] = out;
+  }
 }
 
 // Loop
 void loop() {
   // call sensors.requestTemperatures() to issue a global temperature
   // request to all devices on the bus
-  sensors.requestTemperatures(); // Send the command to get temperatures
-  in = sensors.getTempCByIndex(0);
-  out = sensors.getTempCByIndex(1);
-  updateDisplay();
+  timeBin = (millis() / BIN_MILLIS) % HISTORY_SIZE;
+  if (timeBin == nextBin) {
+    sensors.requestTemperatures(); // Send the command to get temperatures
+    in = sensors.getTempCByIndex(0);
+    out = sensors.getTempCByIndex(1);
+    inBuffer[nextBin] = in;
+    outBuffer[nextBin] = out;
+    nextBin = (nextBin + 1) % HISTORY_SIZE;
+    updateDisplay();
+  }
   delay(1000);
 }
