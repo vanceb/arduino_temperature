@@ -118,7 +118,7 @@ void plot(float* data){
   int nowBin = (millis()/BIN_MILLIS) % HISTORY_SIZE;
   int newY;
   for (int i=1; i<HISTORY_SIZE; i++){
-    newY = display.height() - (int) floor(data[(i + nowBin + 1) % HISTORY_SIZE]*scale);
+    newY = display.height() - (int) floor((data[(i + nowBin) % HISTORY_SIZE] - min)*scale);
     display.drawPixel(START_GRAPH + i, newY, WHITE);
   }
   display.setTextSize(1);
