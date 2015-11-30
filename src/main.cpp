@@ -9,7 +9,7 @@
 
 
 // Set up the pins to communicathttp://www.hobbytronics.co.uk/ds18b20-arduinoe with the display
-// Using software SPI
+// Using software SPI - Arranged to use consecutive pins for easy circuit
 #define OLED_MOSI  10
 #define OLED_CLK   11
 #define OLED_DC    12
@@ -32,36 +32,42 @@ Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 #define MODE_HL_OUT 2
 #define MODE_HIST_IN 3
 #define MODE_HIST_OUT 4
-// MAX_MODES used to roll aroind the modes using: mode++ % MAX_MODES
-#define MAX_MODES 3
+// MAX_MODES used to roll around the modes using: mode++ % MAX_MODES
+#define MAX_MODES 5
 
 // Button
 #define BUTTON_PIN 2
-#define DEBOUNCE 100
-#define LONG_PRESS 3000
+#define DEBOUNCE 50
+#define LONG_PRESS 2000
 
 // Display constants
+// x position to start drawing the graph
 #define START_GRAPH 32
+// Comment out below if you want to plot dots without interconnecting lines
+#define PLOT_LINES 1
 
 // Define variables used
 // The buffer bin containing the next temperature reading
 int nextBin;
 int timeBin;
+// Define variables to hold the current temperature values
+float in;
+float out;
 // These are used to record highs and lows since reset
 float inHigh, inLow;
 float outHigh, outLow;
 // These arrays store highs and lows at 15 minute intervals for 24 hours
 float inBuffer[HISTORY_SIZE];
 float outBuffer[HISTORY_SIZE];
-// Define variables to hold the current temperature values
-float in;
-float out;
+
 // Store the current display mode
 // Declared volatile as we will update this in an interrupt
 volatile static unsigned long last_interrupt_time = 0;
+// Interrupt fires on change so we need to keep track of whether the button
+// has been pressed or released
 volatile static unsigned long btn_pressed;
 volatile static unsigned long btn_released;
-volatile int mode = MODE_LIVE;
+volatile static int mode = MODE_LIVE;
 
 
 // Setup a oneWire instance to communicate with any OneWire devices
@@ -71,6 +77,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 // Helper Functions
+// Get the highest value from a float array
 float highest(float* data){
   float highest = -274.0;
   for (int i=0; i<HISTORY_SIZE; i++){
@@ -80,6 +87,7 @@ float highest(float* data){
   }
   return highest;
 }
+// Get the lowest value from a float array
 float lowest(float* data){
   float lowest = 1000;
   for (int i=0; i<HISTORY_SIZE; i++){
@@ -95,15 +103,18 @@ void drawAxes(){
   // Draw Tickmarks
   for(int i=0; i<HISTORY_SIZE; i++){
     if (i % (HISTORY_SIZE/4) == 0){
+      // Major tick at 6 hour intervals
       int xTick = START_GRAPH + i;
       display.drawLine(xTick, display.height(),xTick, display.height()-4, WHITE);
     } else if (i % (HISTORY_SIZE/24) == 0) {
+      // Minor tick at hour intervals
       int xTick = START_GRAPH + i;
       display.drawLine(xTick, display.height(),xTick, display.height()-2, WHITE);
     }
   }
 }
 
+// Print a label on the graph at a specific position to fit with the axes
 void label(char* text){
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -111,16 +122,36 @@ void label(char* text){
   display.print(text);
 }
 
+// Draw the graph within the axes
 void plot(float* data){
+  // Get the max and min so we can scale the y axis
   float max = highest(data);
   float min = lowest(data);
   float scale = display.height()/(max-min);
+  // The current bin is going to be placed at the RHS of the graph
+  // historical values will be drawn towards the left
   int nowBin = (millis()/BIN_MILLIS) % HISTORY_SIZE;
   int newY;
+#ifdef PLOT_LINES
+  // We want to join the dots
+  // We therefore need the previous plotted position
+  int oldY = display.height() - (int) floor((data[(nowBin)] - min)*scale);
   for (int i=1; i<HISTORY_SIZE; i++){
-    newY = display.height() - (int) floor((data[(i + nowBin) % HISTORY_SIZE] - min)*scale);
-    display.drawPixel(START_GRAPH + i, newY, WHITE);
+    newY = display.height() - (int) floor((data[(nowBin - i) % HISTORY_SIZE] - min)*scale);
+    // Draw a line between the last and current points
+    display.drawLine(display.width() - (i), oldY, display.width() - (i + 1), newY, WHITE);
+    // Update before we go around again
+    oldY = newY;
   }
+#else
+  // We just want the dots
+  for (int i=0; i<HISTORY_SIZE; i++){
+    newY = display.height() - (int) floor((data[(nowBin - i) % HISTORY_SIZE] - min)*scale);
+    // Plot the point
+    display.drawPixel(display.width() - (i+1), newY, WHITE);
+  }
+#endif
+  // Print the max and min values on the y axis
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0,0);
@@ -132,9 +163,9 @@ void plot(float* data){
 // Functions
 // Display the live data
 void displayLive(){
+  display.clearDisplay();
   display.setTextSize(2);
   display.setTextColor(WHITE);
-  display.clearDisplay();
   display.setCursor(0,0);
   display.print("In:  ");
   display.print(in);
@@ -146,6 +177,34 @@ void displayLive(){
 
 // Display the High and Low inside temperatures
 void displayHLIn(){
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.clearDisplay();
+  display.setCursor(0,8);
+  display.print("In:");
+  display.setCursor(64,0);
+  display.print(inHigh);
+  display.setCursor(64,16);
+  display.print(inLow);
+  display.display();
+}
+
+// Display the High and Low outside temperatures
+void displayHLOut(){
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.clearDisplay();
+  display.setCursor(0,8);
+  display.print("Out:");
+  display.setCursor(64,0);
+  display.print(outHigh);
+  display.setCursor(64,16);
+  display.print(outLow);
+  display.display();
+}
+
+// Display a graph of the history data for inside
+void displayHistIn(){
   display.clearDisplay();
   label("In");
   drawAxes();
@@ -153,32 +212,12 @@ void displayHLIn(){
   display.display();
 }
 
-// Display the High and Low outside temperatures
-void displayHLOut(){
+// Display a graph of the history data for outside
+void displayHistOut(){
   display.clearDisplay();
   label("Out");
   drawAxes();
   plot(outBuffer);
-  display.display();
-}
-
-// Display a graph of the history data for inside
-void displayHistIn(){
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  display.clearDisplay();
-  display.setCursor(0,0);
-  display.print("Mode Hist In");
-  display.display();
-}
-
-// Display a graph of the history data for outside
-void displayHistOut(){
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  display.clearDisplay();
-  display.setCursor(0,0);
-  display.print("Mode Hist Out");
   display.display();
 }
 
@@ -215,7 +254,18 @@ void buttonPress() {
     // The Button has been released
     unsigned long pressed_for = millis() - btn_pressed;
     if (pressed_for > LONG_PRESS){
-      mode = MODE_LIVE;
+      switch (mode) {
+        case MODE_HL_IN:
+          inHigh = in;
+          inLow = inHigh;
+          break;
+        case MODE_HL_OUT:
+          outHigh = out;
+          outLow = outHigh;
+          break;
+        default:
+          mode = MODE_LIVE;
+      }
     } else {
       mode = (mode + 1) % MAX_MODES;
     }
@@ -246,6 +296,10 @@ void setup(){
   sensors.requestTemperatures(); // Send the command to get temperatures
   in = sensors.getTempCByIndex(0);
   out = sensors.getTempCByIndex(1);
+  inHigh = in;
+  inLow = in;
+  outHigh = out;
+  outLow = out;
   nextBin = 0;
   for (int i=0; i<HISTORY_SIZE; i++){
     inBuffer[i] = in;
@@ -259,11 +313,19 @@ void loop() {
   // request to all devices on the bus
   timeBin = (millis() / BIN_MILLIS) % HISTORY_SIZE;
   if (timeBin == nextBin) {
-    sensors.requestTemperatures(); // Send the command to get temperatures
+    // Send the command to get temperatures and read them
+    sensors.requestTemperatures();
     in = sensors.getTempCByIndex(0);
     out = sensors.getTempCByIndex(1);
+    // Update the history
     inBuffer[nextBin] = in;
     outBuffer[nextBin] = out;
+    // Check Max and Min temperatures
+    if (in > inHigh) inHigh = in;
+    if (in < inLow) inLow = in;
+    if (out > outHigh) outHigh = out;
+    if (out < outLow) outLow = out;
+    // Update time for next reading
     nextBin = (nextBin + 1) % HISTORY_SIZE;
     updateDisplay();
   }
