@@ -8,7 +8,11 @@
 #include <DallasTemperature.h>
 
 
-// Set up the pins to communicathttp://www.hobbytronics.co.uk/ds18b20-arduinoe with the display
+/*****************************************************************************
+Pins
+*****************************************************************************/
+
+// Set up the pins to communicate with the display
 // Using software SPI - Arranged to use consecutive pins for easy circuit
 #define OLED_MOSI  10
 #define OLED_CLK   11
@@ -20,12 +24,20 @@ Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 // Setup the pin for the one wire temp sensor
 #define ONE_WIRE_BUS 4
 
+// Button
+#define BUTTON_PIN 2
+
+
+/*****************************************************************************
+Contstants
+*****************************************************************************/
 
 // Define some key constants
 // 15 minute intervals for 24 hours -> 24*4 = 96
 #define HISTORY_SIZE 96
-// How many milliseconds in each history bin -> 15*60*1000 = 900,000
+// How many milliseconds in each 15 min history bin -> 15*60*1000 = 900,000
 #define BIN_MILLIS 900000
+
 // Define the display modes
 #define MODE_LIVE 0
 #define MODE_HL_IN 1
@@ -35,8 +47,7 @@ Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 // MAX_MODES used to roll around the modes using: mode++ % MAX_MODES
 #define MAX_MODES 5
 
-// Button
-#define BUTTON_PIN 2
+// Button timing
 #define DEBOUNCE 50
 #define LONG_PRESS 2000
 
@@ -46,7 +57,11 @@ Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 // Comment out below if you want to plot dots without interconnecting lines
 #define PLOT_LINES 1
 
-// Define variables used
+
+/*****************************************************************************
+Global Variables
+*****************************************************************************/
+
 // The buffer bin containing the next temperature reading
 int nextBin;
 int timeBin;
@@ -56,25 +71,35 @@ float out;
 // These are used to record highs and lows since reset
 float inHigh, inLow;
 float outHigh, outLow;
-// These arrays store highs and lows at 15 minute intervals for 24 hours
+// These arrays store temperature readings at 15 minute intervals for 24 hours
 float inBuffer[HISTORY_SIZE];
 float outBuffer[HISTORY_SIZE];
 
-// Store the current display mode
-// Declared volatile as we will update this in an interrupt
+// Following varibles declared volatile as we will update them in an interrupt
+// Hold time of last interrupt so we can debounce and judge short or long press
 volatile static unsigned long last_interrupt_time = 0;
 // Interrupt fires on change so we need to keep track of whether the button
-// has been pressed or released
+// has been pressed or released (We act on release...)
 volatile static unsigned long btn_pressed;
 volatile static unsigned long btn_released;
+// Store the current display mode
 volatile static int mode = MODE_LIVE;
 
+
+/*****************************************************************************
+Hardware (Library) Global Variables
+*****************************************************************************/
 
 // Setup a oneWire instance to communicate with any OneWire devices
 // (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature.
 DallasTemperature sensors(&oneWire);
+
+
+/*****************************************************************************
+Functions - Helper
+*****************************************************************************/
 
 // Helper Functions
 // Get the highest value from a float array
@@ -98,6 +123,11 @@ float lowest(float* data){
   return lowest;
 }
 
+
+/*****************************************************************************
+Functions - Display
+*****************************************************************************/
+
 // Create the Graph axes
 void drawAxes(){
   // Draw Tickmarks
@@ -114,6 +144,7 @@ void drawAxes(){
   }
 }
 
+
 // Print a label on the graph at a specific position to fit with the axes
 void label(char* text){
   display.setTextSize(1);
@@ -121,6 +152,7 @@ void label(char* text){
   display.setCursor(0,12);
   display.print(text);
 }
+
 
 // Draw the graph within the axes
 void plot(float* data){
@@ -160,7 +192,7 @@ void plot(float* data){
   display.print(min);
 }
 
-// Functions
+
 // Display the live data
 void displayLive(){
   display.clearDisplay();
@@ -174,6 +206,7 @@ void displayLive(){
   display.print(out);
   display.display();
 }
+
 
 // Display the High and Low inside temperatures
 void displayHLIn(){
@@ -189,6 +222,7 @@ void displayHLIn(){
   display.display();
 }
 
+
 // Display the High and Low outside temperatures
 void displayHLOut(){
   display.setTextSize(2);
@@ -203,6 +237,7 @@ void displayHLOut(){
   display.display();
 }
 
+
 // Display a graph of the history data for inside
 void displayHistIn(){
   display.clearDisplay();
@@ -212,6 +247,7 @@ void displayHistIn(){
   display.display();
 }
 
+
 // Display a graph of the history data for outside
 void displayHistOut(){
   display.clearDisplay();
@@ -220,6 +256,7 @@ void displayHistOut(){
   plot(outBuffer);
   display.display();
 }
+
 
 // Update the display
 void updateDisplay() {
@@ -245,6 +282,12 @@ void updateDisplay() {
       break;
   }
 }
+
+
+/*****************************************************************************
+Functions - Button
+*****************************************************************************/
+
 // Do Button actions
 void buttonPress() {
   if (digitalRead(BUTTON_PIN) == LOW){
@@ -273,6 +316,7 @@ void buttonPress() {
   }
 }
 
+
 // Interrupt handler to take user button input
 void buttonInterrupt() {
   unsigned long now = millis();
@@ -282,6 +326,11 @@ void buttonInterrupt() {
   }
 }
 
+
+/*****************************************************************************
+Setup and Loop
+*****************************************************************************/
+
 // Setup
 void setup(){
   // Initialise the Display
@@ -289,10 +338,12 @@ void setup(){
   // Start up the DallasTemperature sensor
   sensors.begin();  // Start up the library
   mode = MODE_LIVE;
-  // Attach Button Interrupt
-  pinMode(BUTTON_PIN, INPUT);
+
+  // Attach Button Interrupt - internal pullup to reduce component count
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonInterrupt, CHANGE);
-  // Set the last read time to 0
+
+  // Initialise the temperature variables to sensible values
   sensors.requestTemperatures(); // Send the command to get temperatures
   in = sensors.getTempCByIndex(0);
   out = sensors.getTempCByIndex(1);
@@ -307,11 +358,12 @@ void setup(){
   }
 }
 
+
 // Loop
 void loop() {
-  // call sensors.requestTemperatures() to issue a global temperature
-  // request to all devices on the bus
+  // We use "Time Bins" to record and store the data
   timeBin = (millis() / BIN_MILLIS) % HISTORY_SIZE;
+  // See if it it time for us to take another reading
   if (timeBin == nextBin) {
     // Send the command to get temperatures and read them
     sensors.requestTemperatures();
@@ -320,7 +372,7 @@ void loop() {
     // Update the history
     inBuffer[nextBin] = in;
     outBuffer[nextBin] = out;
-    // Check Max and Min temperatures
+    // Check and update the Max and Min temperatures
     if (in > inHigh) inHigh = in;
     if (in < inLow) inLow = in;
     if (out > outHigh) outHigh = out;
