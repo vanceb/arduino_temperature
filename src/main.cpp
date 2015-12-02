@@ -36,7 +36,8 @@ Contstants
 // 15 minute intervals for 24 hours -> 24*4 = 96
 #define HISTORY_SIZE 96
 // How many milliseconds in each 15 min history bin -> 15*60*1000 = 900,000
-#define BIN_MILLIS 900000
+//#define BIN_MILLIS 900000
+#define BIN_MILLIS 60000
 
 // Define the display modes
 #define MODE_LIVE 0
@@ -66,14 +67,14 @@ Global Variables
 int nextBin;
 int timeBin;
 // Define variables to hold the current temperature values
-float in;
-float out;
+int in;
+int out;
 // These are used to record highs and lows since reset
-float inHigh, inLow;
-float outHigh, outLow;
+int inHigh, inLow;
+int outHigh, outLow;
 // These arrays store temperature readings at 15 minute intervals for 24 hours
-float inBuffer[HISTORY_SIZE];
-float outBuffer[HISTORY_SIZE];
+int inBuffer[HISTORY_SIZE];
+int outBuffer[HISTORY_SIZE];
 
 // Following varibles declared volatile as we will update them in an interrupt
 // Hold time of last interrupt so we can debounce and judge short or long press
@@ -103,8 +104,8 @@ Functions - Helper
 
 // Helper Functions
 // Get the highest value from a float array
-float highest(float* data){
-  float highest = -274.0;
+int highest(int* data){
+  int highest = -274.0;
   for (int i=0; i<HISTORY_SIZE; i++){
     if(data[i] > highest){
       highest = data[i];
@@ -113,8 +114,8 @@ float highest(float* data){
   return highest;
 }
 // Get the lowest value from a float array
-float lowest(float* data){
-  float lowest = 1000;
+int lowest(int* data){
+  int lowest = 1000;
   for (int i=0; i<HISTORY_SIZE; i++){
     if(data[i] < lowest){
       lowest = data[i];
@@ -155,11 +156,16 @@ void label(char* text){
 
 
 // Draw the graph within the axes
-void plot(float* data){
+void plot(int* data){
   // Get the max and min so we can scale the y axis
-  float max = highest(data);
-  float min = lowest(data);
-  float scale = display.height()/(max-min);
+  int max = highest(data);
+  int min = lowest(data);
+  int scale;
+  if (max == min){
+    scale = display.height();
+  } else {
+    scale = display.height()*10/(max-min);
+  }
   // The current bin is going to be placed at the RHS of the graph
   // historical values will be drawn towards the left
   int nowBin = (millis()/BIN_MILLIS) % HISTORY_SIZE;
@@ -184,12 +190,16 @@ void plot(float* data){
   }
 #endif
   // Print the max and min values on the y axis
+  char max_str[6];
+  char min_str[6];
+  sprintf(max_str, "%2d.%1d", max/10,out%10);
+  sprintf(min_str, "%2d.%1d", min/10,min%10);
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0,0);
-  display.print(max);
+  display.print(max_str);
   display.setCursor(0,display.height() - 7);
-  display.print(min);
+  display.print(min_str);
 }
 
 
@@ -200,40 +210,52 @@ void displayLive(){
   display.setTextColor(WHITE);
   display.setCursor(0,0);
   display.print("In:  ");
-  display.print(in);
+  char in_str[6];
+  char out_str[6];
+  sprintf(in_str, "%2d.%1d", in/10,in%10);
+  sprintf(out_str, "%2d.%1d", out/10,out%10);
+  display.print(in_str);
   display.setCursor(0,16);
   display.print("Out: ");
-  display.print(out);
+  display.print(out_str);
   display.display();
 }
 
 
 // Display the High and Low inside temperatures
 void displayHLIn(){
+  char max_str[6];
+  char min_str[6];
+  sprintf(max_str, "%2d.%1d", inHigh/10,inHigh%10);
+  sprintf(min_str, "%2d.%1d", inLow/10,inLow%10);
   display.setTextSize(2);
   display.setTextColor(WHITE);
   display.clearDisplay();
   display.setCursor(0,8);
   display.print("In:");
   display.setCursor(64,0);
-  display.print(inHigh);
+  display.print(max_str);
   display.setCursor(64,16);
-  display.print(inLow);
+  display.print(min_str);
   display.display();
 }
 
 
 // Display the High and Low outside temperatures
 void displayHLOut(){
+  char max_str[6];
+  char min_str[6];
+  sprintf(max_str, "%2d.%1d", outHigh/10,outHigh%10);
+  sprintf(min_str, "%2d.%1d", outLow/10,outLow%10);
   display.setTextSize(2);
   display.setTextColor(WHITE);
   display.clearDisplay();
   display.setCursor(0,8);
   display.print("Out:");
   display.setCursor(64,0);
-  display.print(outHigh);
+  display.print(max_str);
   display.setCursor(64,16);
-  display.print(outLow);
+  display.print(min_str);
   display.display();
 }
 
@@ -345,8 +367,8 @@ void setup(){
 
   // Initialise the temperature variables to sensible values
   sensors.requestTemperatures(); // Send the command to get temperatures
-  in = sensors.getTempCByIndex(0);
-  out = sensors.getTempCByIndex(1);
+  in = (long)(sensors.getTempCByIndex(0)*10);
+  out = (long)(sensors.getTempCByIndex(1)*10);
   inHigh = in;
   inLow = in;
   outHigh = out;
@@ -367,8 +389,8 @@ void loop() {
   if (timeBin == nextBin) {
     // Send the command to get temperatures and read them
     sensors.requestTemperatures();
-    in = sensors.getTempCByIndex(0);
-    out = sensors.getTempCByIndex(1);
+    in = (long)(sensors.getTempCByIndex(0)*10);
+    out = (long)(sensors.getTempCByIndex(1)*10);
     // Update the history
     inBuffer[nextBin] = in;
     outBuffer[nextBin] = out;
